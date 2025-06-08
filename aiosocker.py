@@ -16,7 +16,7 @@ class AioSocker:
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
 
-        self._loop.run_until_complete(self._get_and_start_sockets())
+        self._loop.run_forever()
         self._loop.close()
 
     class _handler(asyncio.DatagramProtocol):
@@ -26,32 +26,23 @@ class AioSocker:
         def datagram_received(self, data, addr):
             self.q.put(data)
 
-    async def _get_and_start_sockets(self):
-        while True:
-            this_socket = await self._new_socket_q.get()
-            new_q = queue.Queue()
-            async def rx_task():
-                transport, _protocol = await self._loop.create_datagram_endpoint(
-                    lambda: self._handler(new_q),
-                    sock=this_socket,
-                )
-                self._socket_transports[this_socket] = transport
-                while True:
-                    await asyncio.sleep(0.1) #keep the loop running
-                #
-            #
-            task = asyncio.create_task(rx_task())
+    async def _start_rx_task(self, sock: socket.socket) -> Tuple[queue.Queue, Callable]:
+        new_q = queue.Queue()
+        task = asyncio.create_task(
+            self._loop.create_datagram_endpoint(
+                lambda: self._handler(new_q),
+                sock=sock,
+            )
+        )
 
-            def stop():
-                self._loop.call_soon_threadsafe(self._socket_transports[this_socket].close())
-                self._loop.call_soon_threadsafe(task.cancel)
-                self._socket_transports.pop(this_socket, None)
+        def stop():
+            self._loop.call_soon_threadsafe(task.cancel)
 
-            self._new_queue_q.put((new_q, stop))
+        return new_q, stop
 
     def start_receiving_on(self, sock: socket.socket) -> Tuple[queue.Queue, Callable]:
-        asyncio.run_coroutine_threadsafe(self._new_socket_q.put(sock), self._loop)
-        return self._new_queue_q.get()
+        future = asyncio.run_coroutine_threadsafe(self._start_rx_task(sock), self._loop)
+        return future.result()
 
 if __name__ == "__main__":
     sockman = AioSocker()
