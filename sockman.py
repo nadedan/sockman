@@ -28,6 +28,7 @@ class SockMan:
 
     async def _start_rx_task(self, sock: socket.socket) -> Tuple[queue.Queue, Callable]:
         new_q = queue.Queue()
+
         task = self._loop.create_task(
             self._loop.create_datagram_endpoint(
                 lambda: self._handler(new_q),
