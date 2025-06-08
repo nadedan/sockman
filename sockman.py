@@ -4,13 +4,13 @@ import queue
 import socket
 from typing import Callable, Tuple
 
-class AioSocker:
+class SockMan:
     def __init__(self):
-        self._new_socket_q = asyncio.Queue()
-        self._new_queue_q = queue.Queue()
-        self._socket_transports = {}
         self._thread = threading.Thread(target=self._run_event_loop, daemon=True)
         self._thread.start()
+
+    def __del__(self):
+        self._loop.stop()
 
     def _run_event_loop(self):
         self._loop = asyncio.new_event_loop()
@@ -28,7 +28,7 @@ class AioSocker:
 
     async def _start_rx_task(self, sock: socket.socket) -> Tuple[queue.Queue, Callable]:
         new_q = queue.Queue()
-        task = asyncio.create_task(
+        task = self._loop.create_task(
             self._loop.create_datagram_endpoint(
                 lambda: self._handler(new_q),
                 sock=sock,
@@ -44,8 +44,31 @@ class AioSocker:
         future = asyncio.run_coroutine_threadsafe(self._start_rx_task(sock), self._loop)
         return future.result()
 
+def test_many_ports():
+    sockman = SockMan()
+    ques = {}
+    for i in range(100):
+        port = 9000 + i
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind(('', port))
+
+        ques[port] = sockman.start_receiving_on(sock)
+
+    p = 1
+    while True:
+        p = input("Enter port to read: ")
+        p = int(p)
+        if p == 0:
+            quit()
+        q, stop = ques[p]
+        d = q.get()
+        print(d.decode())
+
 if __name__ == "__main__":
-    sockman = AioSocker()
+    test_many_ports()
+
+    sockman = SockMan()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(('', 9000))
